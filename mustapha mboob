@@ -1,0 +1,117 @@
+package main
+
+import (
+    "fmt"
+    "math"
+    "math/rand"
+)
+
+// Define constants for the MNIST dataset
+const (
+    imageWidth  = 28
+    imageHeight = 28
+    numLabels   = 10
+    numImages   = 60000
+)
+
+// Define constants for the Federated Average Algorithm
+const (
+    numVehicles   = 10
+    localEpochs   = 10
+    deltaF        = 1.0
+    epsilon       = 0.1
+    learningRate  = 0.1
+    batchSize     = 32
+    numGlobalIter = 100
+)
+
+// Define a struct for a single MNIST image
+type MNISTImage struct {
+    label byte
+    image []byte
+}
+
+// Define a struct for a vehicle in the VANET
+type Vehicle struct {
+    id        int
+    localData []MNISTImage
+    localModel []float64
+}
+
+// Define a struct for the global model
+type GlobalModel struct {
+    weights []float64
+}
+
+// Load the MNIST dataset from file
+func loadMNIST(filename string) ([]MNISTImage, error) {
+    file, err := os.Open(filename)
+    if err != nil {
+        return nil, err
+    }
+    defer file.Close()
+
+    var header struct {
+        Magic    uint32
+        NumItems uint32
+    }
+    if err := binary.Read(file, binary.BigEndian, &header); err != nil {
+        return nil, err
+    }
+
+    images := make([]MNISTImage, header.NumItems)
+    for i := range images {
+        var label byte
+        if err := binary.Read(file, binary.BigEndian, &label); err != nil {
+            return nil, err
+        }
+        images[i].label = label
+
+        images[i].image = make([]byte, imageWidth*imageHeight)
+        if err := binary.Read(file, binary.BigEndian, images[i].image); err != nil {
+            return nil, err
+        }
+    }
+
+    return images, nil
+}
+
+// Split the MNIST dataset into local datasets for each vehicle
+func splitMNIST(images []MNISTImage) [][]MNISTImage {
+    localData := make([][]MNISTImage, numVehicles)
+
+    for i := range images {
+        vehicle := i % numVehicles
+        localData[vehicle] = append(localData[vehicle], images[i])
+    }
+
+    return localData
+}
+
+// Train a local model on a local dataset
+func trainLocalModel(localData []MNISTImage, localModel []float64) []float64 {
+    for epoch := 0; epoch < localEpochs; epoch++ {
+        rand.Shuffle(len(localData), func(i, j int) {
+            localData[i], localData[j] = localData[j], localData[i]
+        })
+
+        for i := 0; i < len(localData); i += batchSize {
+            end := i + batchSize
+            if end > len(localData) {
+                end = len(localData)
+            }
+
+            batch := localData[i:end]
+
+            for j := range localModel {
+                gradient := 0.0
+
+                for _, image := range batch {
+                    input := make([]float64, imageWidth*imageHeight)
+                    for k := range input {
+                        input[k] = float64(image.image[k]) / 255.0
+                    }
+
+                    output := float64(image.label)
+
+                    y := dot(input, local
