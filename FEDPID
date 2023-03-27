@@ -1,0 +1,70 @@
+import numpy as np
+import tensorflow as tf
+
+# Define the PID controller parameters
+Kp = 0.5
+Ki = 0.2
+Kd = 0.1
+prev_error = 0
+integral_error = 0
+
+# Define the federated learning model
+def create_model():
+    model = tf.keras.Sequential([
+        tf.keras.layers.Dense(10, activation='relu', input_shape=(10,)),
+        tf.keras.layers.Dense(1, activation='sigmoid')
+    ])
+    return model
+
+# Define the local training function
+def local_train(model, x_train, y_train, learning_rate):
+    optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate)
+    model.compile(optimizer=optimizer, loss='binary_crossentropy', metrics=['accuracy'])
+    model.fit(x_train, y_train, epochs=10, verbose=0)
+    loss, acc = model.evaluate(x_train, y_train, verbose=0)
+    return loss, acc
+
+# Define the federated training function with PID control
+def federated_train_pid(num_clients, x_train, y_train, learning_rate):
+    global Kp, Ki, Kd, prev_error, integral_error
+    model = create_model()
+    loss_values = []
+    for i in range(num_clients):
+        x = x_train[i]
+        y = y_train[i]
+        loss, acc = local_train(model, x, y, learning_rate)
+        loss_values.append(loss)
+    mean_loss = np.mean(loss_values)
+    error = 0.5 - mean_loss  # Set the setpoint to 0.5
+    derivative_error = error - prev_error
+    prev_error = error
+    integral_error += error
+    learning_rate = Kp * error + Ki * integral_error + Kd * derivative_error
+    return learning_rate
+
+# Define the main function
+def main():
+    # Load the data
+    (x_train, y_train), _ = tf.keras.datasets.mnist.load_data()
+    x_train = x_train.reshape((x_train.shape[0], 784))
+    x_train = x_train.astype('float32') / 255
+    y_train = y_train.astype('float32')
+
+    # Divide the data into local datasets for each client
+    num_clients = 10
+    x_train_local = np.array_split(x_train, num_clients)
+    y_train_local = np.array_split(y_train, num_clients)
+
+    # Set the initial learning rate
+    learning_rate = 0.1
+
+    # Train the model for 10 iterations
+    for i in range(10):
+        # Update the learning rate using PID control
+        learning_rate = federated_train_pid(num_clients, x_train_local, y_train_local, learning_rate)
+
+        # Print the current learning rate
+        print(f"Iteration {i}: Learning rate = {learning_rate}")
+
+if __name__ == '__main__':
+    main()
