@@ -1,0 +1,84 @@
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.datasets import mnist
+
+# Load MNIST dataset
+(x_train, y_train), (x_test, y_test) = mnist.load_data()
+
+# Preprocess data
+x_train = x_train.reshape(-1, 784) / 255.0
+x_test = x_test.reshape(-1, 784) / 255.0
+y_train = y_train.astype(np.int32)
+y_test = y_test.astype(np.int32)
+
+# Define model architecture
+model = tf.keras.Sequential([
+    tf.keras.layers.Dense(128, activation='relu', input_shape=(784,)),
+    tf.keras.layers.Dense(10, activation='softmax')
+])
+
+# Define loss function and optimizer
+loss_fn = tf.keras.losses.SparseCategoricalCrossentropy()
+optimizer = tf.keras.optimizers.Adam()
+
+# Define hyperparameters
+num_rounds = 10
+batch_size = 32
+num_local_epochs = 5
+epsilon = 1.0
+delta_f = 1.0
+
+# Define Laplacian perturbation function
+def laplacian_perturbation(size, scale):
+    return np.random.laplace(loc=0.0, scale=scale, size=size)
+
+# Initialize global model parameters
+global_weights = model.get_weights()
+
+# Initialize number of vehicles
+num_vehicles = 10
+
+# Divide data into chunks for each vehicle
+x_train_chunks = np.array_split(x_train, num_vehicles)
+y_train_chunks = np.array_split(y_train, num_vehicles)
+
+# Run federated learning algorithm
+for round_num in range(num_rounds):
+    # Select random subset of vehicles
+    selected_indices = np.random.choice(num_vehicles, int(num_vehicles * 0.5), replace=False)
+    selected_x_train_chunks = [x_train_chunks[i] for i in selected_indices]
+    selected_y_train_chunks = [y_train_chunks[i] for i in selected_indices]
+    
+    # Train local models
+    local_weights_list = []
+    for i in range(len(selected_x_train_chunks)):
+        local_model = tf.keras.models.clone_model(model)
+        local_model.set_weights(global_weights)
+        local_model.compile(loss=loss_fn, optimizer=optimizer, metrics=['accuracy'])
+        local_model.fit(selected_x_train_chunks[i], selected_y_train_chunks[i], 
+                        batch_size=batch_size, epochs=num_local_epochs, verbose=0)
+        local_weights_list.append(local_model.get_weights())
+    
+    # Compute Laplacian perturbations for each vehicle
+    perturbed_weights_list = []
+    for i in range(len(local_weights_list)):
+        perturbation = laplacian_perturbation(local_weights_list[i][0].shape, delta_f/epsilon)
+        perturbed_weights = [w + p for w, p in zip(local_weights_list[i], [perturbation] + [np.zeros_like(w) for w in local_weights_list[i][1:]])]
+        perturbed_weights_list.append(perturbed_weights)
+    
+    # Compute weighted average of perturbed weights
+    numerator = np.zeros_like(global_weights)
+    denominator = 0
+    for i in range(len(selected_indices)):
+        vehicle_index = selected_indices[i]
+        n = len(selected_x_train_chunks[i])
+        numerator += np.array(perturbed_weights_list[i]) * n
+        denominator += n
+    average_weights = numerator / denominator
+    
+    # Update global model weights
+    global_weights = average_weights
+
+    # Evaluate global model on test data
+    model.set_weights(global_weights)
+    test_loss, test_accuracy = model.evaluate(x_test, y
